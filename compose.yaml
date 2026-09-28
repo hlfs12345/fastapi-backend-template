@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgis/postgis:18-3.6
+    container_name: edisk-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+
+    secrets:
+      - postgres_password
+
+    ports:
+      - "127.0.0.1:5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    networks:
+      - backend
+
+  redis:
+    image: redis:8.6.7-alpine
+    container_name: edisk-redis
+    restart: unless-stopped
+
+    command:
+      - /bin/sh
+      - -c
+      - 'exec redis-server --appendonly yes --requirepass "$$(cat /run/secrets/redis_password)"'
+
+    secrets:
+      - redis_password
+
+    ports:
+      - "127.0.0.1:6379:6379"
+
+    volumes:
+      - redis_data:/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli ping | grep PONG',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    networks:
+      - backend
+
+  openbao:
+    image: openbao/openbao:2.6.2
+    container_name: edisk-openbao
+    restart: unless-stopped
+
+    command:
+      - server
+
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+      SKIP_CHOWN: "1"
+
+    ports:
+      - "127.0.0.1:8200:8200"
+
+    volumes:
+      - ./infra/openbao/config:/openbao/config:ro
+      - ./infra/openbao/policies:/openbao/policies:ro
+      - openbao_data:/openbao/data
+
+    networks:
+      - backend
+
+secrets:
+  postgres_password:
+    file: ./.secrets/postgres_password.txt
+
+  redis_password:
+    file: ./.secrets/redis_password.txt
+
+volumes:
+  postgres_data:
+  redis_data:
+  openbao_data:
+
+networks:
+  backend:
+    name: edisk-backend

@@ -1,0 +1,15 @@
+.secrets/
+.env
+
+__pycache__/
+*.pyc
+
+.dart_tool/
+build/
+
+.idea/
+.vscode/
+
+# Local tooling and shell caches
+.tools/
+Microsoft/
