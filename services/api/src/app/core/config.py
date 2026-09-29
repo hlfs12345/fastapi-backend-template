@@ -20,7 +20,15 @@ class Settings(BaseSettings):
     redis_url: SecretStr
     openbao_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:8200")
     openbao_token: SecretStr | None = None
+    openbao_role_id: SecretStr | None = None
+    openbao_secret_id: SecretStr | None = None
     dependency_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
+
+    auth_jwt_secret: SecretStr | None = Field(default=None, min_length=32)
+    auth_access_token_minutes: int = Field(default=15, ge=1, le=60)
+    auth_refresh_token_days: int = Field(default=30, ge=1, le=90)
+    auth_issuer: str = "edisk-api"
+    auth_audience: str = "edisk-app"
 
 
 @lru_cache

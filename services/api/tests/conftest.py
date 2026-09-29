@@ -14,6 +14,7 @@ def settings() -> Settings:
         database_url="postgresql+asyncpg://test:test@127.0.0.1:5432/test",
         redis_url="redis://127.0.0.1:6379/0",
         openbao_url="http://127.0.0.1:8200",
+        auth_jwt_secret="test-only-jwt-secret-with-at-least-32-characters",
         dependency_timeout_seconds=0.1,
     )
 
