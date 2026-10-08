@@ -11,11 +11,19 @@ logger = logging.getLogger(__name__)
 
 
 class ApplicationError(Exception):
-    def __init__(self, *, code: str, message: str, status_code: int = 400) -> None:
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        status_code: int = 400,
+        details: Any | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.details = details
 
 
 def _error_content(
@@ -23,7 +31,7 @@ def _error_content(
     code: str,
     message: str,
     request_id: str | None = None,
-    details: list[dict[str, Any]] | None = None,
+    details: Any | None = None,
 ) -> dict[str, Any]:
     error: dict[str, Any] = {"code": code, "message": message}
     if details is not None:
@@ -40,6 +48,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 code=error.code,
                 message=error.message,
                 request_id=getattr(request.state, "request_id", None),
+                details=error.details,
             ),
         )
 

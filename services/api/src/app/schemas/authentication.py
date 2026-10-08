@@ -1,6 +1,7 @@
+from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr
 
 
 class LoginRequest(BaseModel):
@@ -20,7 +21,25 @@ class TokenResponse(BaseModel):
     expires_in: int
 
 
+class AuthenticatedRoleResponse(BaseModel):
+    key: str
+    name: str
+
+
 class AuthenticatedContextResponse(BaseModel):
     user_id: UUID
+    email: EmailStr
     tenant_id: UUID
+    tenant_name: str
+    tenant_slug: str
     tenant_user_id: UUID
+    joined_at: datetime
+    roles: list[AuthenticatedRoleResponse]
+    permissions: list[str]
+
+
+class PasswordChangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: SecretStr = Field(min_length=1, max_length=1024)
+    new_password: SecretStr = Field(min_length=12, max_length=1024)

@@ -2,12 +2,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Select, and_, select, update
+from sqlalchemy import Select, and_, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 
 from app.core.security import AccessTokenClaims
 from app.core.tenant_context import TenantContext
 from app.models import (
+    LegalAcceptance,
+    LegalDocument,
+    LegalDocumentVersion,
     RefreshSession,
     Role,
     RolePermission,
@@ -55,15 +58,59 @@ class AuthenticationRepository:
         email_blind_index: str,
         tenant_slug: str,
     ) -> AuthenticationIdentity | None:
-        statement = self._identity_statement().where(
-            User.email_blind_index == email_blind_index,
-            Tenant.slug == tenant_slug,
-            User.disabled_at.is_(None),
-            Tenant.deactivated_at.is_(None),
-            TenantUser.deactivated_at.is_(None),
+        statement = (
+            self._identity_statement()
+            .where(
+                User.email_blind_index == email_blind_index,
+                Tenant.slug == tenant_slug,
+                User.disabled_at.is_(None),
+                Tenant.deactivated_at.is_(None),
+                TenantUser.deactivated_at.is_(None),
+            )
+            .with_for_update(of=User)
         )
         row = (await self._session.execute(statement)).one_or_none()
         return AuthenticationIdentity(*row) if row else None
+
+    async def get_authenticated_identity(
+        self,
+        context: TenantContext,
+    ) -> AuthenticationIdentity | None:
+        statement = self._active_identity_statement(context)
+        row = (await self._session.execute(statement)).one_or_none()
+        return AuthenticationIdentity(*row) if row else None
+
+    async def get_authenticated_identity_for_update(
+        self,
+        context: TenantContext,
+    ) -> AuthenticationIdentity | None:
+        statement = self._active_identity_statement(context).with_for_update(of=User)
+        row = (await self._session.execute(statement)).one_or_none()
+        return AuthenticationIdentity(*row) if row else None
+
+    async def get_active_roles(
+        self,
+        *,
+        tenant_id: UUID,
+        tenant_user_id: UUID,
+    ) -> list[Role]:
+        statement = (
+            select(Role)
+            .join(
+                TenantUserRole,
+                and_(
+                    TenantUserRole.role_id == Role.id,
+                    TenantUserRole.tenant_id == Role.tenant_id,
+                ),
+            )
+            .where(
+                Role.tenant_id == tenant_id,
+                TenantUserRole.tenant_user_id == tenant_user_id,
+                Role.deactivated_at.is_(None),
+            )
+            .order_by(Role.name, Role.key, Role.id)
+        )
+        return list((await self._session.execute(statement)).scalars())
 
     async def get_active_tenant_context(
         self,
@@ -85,17 +132,33 @@ class AuthenticationRepository:
             tenant_id=tenant.id,
             tenant_user_id=tenant_user.id,
         )
+        pending_legal_version_ids = await self._get_pending_legal_version_ids(
+            tenant_id=tenant.id,
+            user_id=user.id,
+        )
         return TenantContext(
             tenant_id=tenant.id,
             user_id=user.id,
             tenant_user_id=tenant_user.id,
             permissions=permissions,
+            pending_legal_version_ids=pending_legal_version_ids,
         )
 
     async def get_refresh_identity_for_update(
         self,
         token_hash: bytes,
     ) -> RefreshIdentity | None:
+        user_id = (
+            await self._session.execute(
+                select(RefreshSession.user_id).where(RefreshSession.token_hash == token_hash)
+            )
+        ).scalar_one_or_none()
+        if user_id is None:
+            return None
+
+        await self._session.execute(
+            select(User.id).where(User.id == user_id).with_for_update(of=User)
+        )
         statement = (
             select(RefreshSession, User, Tenant, TenantUser)
             .join(User, User.id == RefreshSession.user_id)
@@ -142,11 +205,59 @@ class AuthenticationRepository:
         )
         return frozenset((await self._session.execute(statement)).scalars())
 
+    async def _get_pending_legal_version_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> tuple[UUID, ...]:
+        accepted = exists(
+            select(LegalAcceptance.id).where(
+                LegalAcceptance.tenant_id == tenant_id,
+                LegalAcceptance.legal_document_version_id == LegalDocumentVersion.id,
+                or_(
+                    LegalAcceptance.acceptance_scope == "TENANT",
+                    and_(
+                        LegalAcceptance.acceptance_scope == "USER",
+                        LegalAcceptance.actor_user_id == user_id,
+                    ),
+                ),
+            )
+        )
+        statement = (
+            select(LegalDocumentVersion.id)
+            .join(
+                LegalDocument,
+                and_(
+                    LegalDocument.current_version_id == LegalDocumentVersion.id,
+                    LegalDocument.id == LegalDocumentVersion.legal_document_id,
+                    LegalDocument.tenant_id == LegalDocumentVersion.tenant_id,
+                ),
+            )
+            .where(
+                LegalDocument.tenant_id == tenant_id,
+                LegalDocumentVersion.is_required.is_(True),
+                ~accepted,
+            )
+            .order_by(LegalDocument.key, LegalDocumentVersion.version)
+        )
+        return tuple((await self._session.execute(statement)).scalars())
+
     async def revoke_family(self, family_id: UUID, revoked_at: datetime) -> None:
         await self._session.execute(
             update(RefreshSession)
             .where(
                 RefreshSession.family_id == family_id,
+                RefreshSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=revoked_at)
+        )
+
+    async def revoke_user_sessions(self, user_id: UUID, revoked_at: datetime) -> None:
+        await self._session.execute(
+            update(RefreshSession)
+            .where(
+                RefreshSession.user_id == user_id,
                 RefreshSession.revoked_at.is_(None),
             )
             .values(revoked_at=revoked_at)
@@ -158,4 +269,18 @@ class AuthenticationRepository:
             select(User, Tenant, TenantUser)
             .join(TenantUser, TenantUser.user_id == User.id)
             .join(Tenant, Tenant.id == TenantUser.tenant_id)
+        )
+
+    @classmethod
+    def _active_identity_statement(
+        cls,
+        context: TenantContext,
+    ) -> Select[tuple[User, Tenant, TenantUser]]:
+        return cls._identity_statement().where(
+            User.id == context.user_id,
+            Tenant.id == context.tenant_id,
+            TenantUser.id == context.tenant_user_id,
+            User.disabled_at.is_(None),
+            Tenant.deactivated_at.is_(None),
+            TenantUser.deactivated_at.is_(None),
         )

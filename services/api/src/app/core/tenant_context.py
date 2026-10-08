@@ -8,3 +8,4 @@ class TenantContext:
     user_id: UUID
     tenant_user_id: UUID
     permissions: frozenset[str] = frozenset()
+    pending_legal_version_ids: tuple[UUID, ...] = ()

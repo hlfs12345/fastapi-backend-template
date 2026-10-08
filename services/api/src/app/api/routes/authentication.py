@@ -2,11 +2,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response, status
 
-from app.api.dependencies import get_authentication_service, get_tenant_context
+from app.api.dependencies import (
+    get_authentication_service,
+    get_tenant_context,
+    require_legal_acceptances,
+)
 from app.core.tenant_context import TenantContext
 from app.schemas.authentication import (
     AuthenticatedContextResponse,
+    AuthenticatedRoleResponse,
     LoginRequest,
+    PasswordChangeRequest,
     RefreshRequest,
     TokenResponse,
 )
@@ -60,13 +66,37 @@ async def logout(
 
 @router.get("/me", response_model=AuthenticatedContextResponse)
 async def me(
+    response: Response,
     context: Annotated[TenantContext, Depends(get_tenant_context)],
+    service: Annotated[AuthenticationService, Depends(get_authentication_service)],
 ) -> AuthenticatedContextResponse:
+    account = await service.get_authenticated_account(context)
+    _disable_token_response_caching(response)
     return AuthenticatedContextResponse(
-        user_id=context.user_id,
-        tenant_id=context.tenant_id,
-        tenant_user_id=context.tenant_user_id,
+        user_id=account.user_id,
+        email=account.email,
+        tenant_id=account.tenant_id,
+        tenant_name=account.tenant_name,
+        tenant_slug=account.tenant_slug,
+        tenant_user_id=account.tenant_user_id,
+        joined_at=account.joined_at,
+        roles=[AuthenticatedRoleResponse(key=role.key, name=role.name) for role in account.roles],
+        permissions=list(account.permissions),
     )
+
+
+@router.put("/password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: PasswordChangeRequest,
+    context: Annotated[TenantContext, Depends(require_legal_acceptances)],
+    service: Annotated[AuthenticationService, Depends(get_authentication_service)],
+) -> Response:
+    await service.change_password(
+        context=context,
+        current_password=payload.current_password.get_secret_value(),
+        new_password=payload.new_password.get_secret_value(),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _disable_token_response_caching(response: Response) -> None:

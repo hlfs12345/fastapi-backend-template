@@ -25,6 +25,25 @@ class AuthenticationTokens:
     expires_in: int
 
 
+@dataclass(frozen=True, slots=True)
+class AuthenticatedRole:
+    key: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticatedAccount:
+    user_id: UUID
+    email: str
+    tenant_id: UUID
+    tenant_name: str
+    tenant_slug: str
+    tenant_user_id: UUID
+    joined_at: datetime
+    roles: tuple[AuthenticatedRole, ...]
+    permissions: tuple[str, ...]
+
+
 class AuthenticationService:
     def __init__(
         self,
@@ -115,6 +134,66 @@ class AuthenticationService:
         if context is None:
             raise _authentication_required()
         return context
+
+    async def get_authenticated_account(
+        self,
+        context: TenantContext,
+    ) -> AuthenticatedAccount:
+        identity = await self._repository.get_authenticated_identity(context)
+        if identity is None:
+            raise _authentication_required()
+        try:
+            email = await self._email_protector.reveal(
+                identity.user.id,
+                identity.user.email_ciphertext,
+            )
+        except (OpenBaoError, UnicodeDecodeError) as error:
+            raise ApplicationError(
+                code="identity_service_unavailable",
+                message="The identity service is temporarily unavailable.",
+                status_code=503,
+            ) from error
+
+        roles = await self._repository.get_active_roles(
+            tenant_id=context.tenant_id,
+            tenant_user_id=context.tenant_user_id,
+        )
+        return AuthenticatedAccount(
+            user_id=identity.user.id,
+            email=email,
+            tenant_id=identity.tenant.id,
+            tenant_name=identity.tenant.name,
+            tenant_slug=identity.tenant.slug,
+            tenant_user_id=identity.tenant_user.id,
+            joined_at=identity.tenant_user.joined_at,
+            roles=tuple(AuthenticatedRole(key=role.key, name=role.name) for role in roles),
+            permissions=tuple(sorted(context.permissions)),
+        )
+
+    async def change_password(
+        self,
+        *,
+        context: TenantContext,
+        current_password: str,
+        new_password: str,
+    ) -> None:
+        now = datetime.now(UTC)
+        async with self._repository.transaction():
+            identity = await self._repository.get_authenticated_identity_for_update(context)
+            if identity is None:
+                raise _authentication_required()
+            valid, _ = self._password_manager.verify_and_update(
+                current_password,
+                identity.user.password_hash,
+            )
+            if not valid:
+                raise ApplicationError(
+                    code="invalid_current_password",
+                    message="The current password is invalid.",
+                    status_code=400,
+                )
+            identity.user.password_hash = self._password_manager.hash(new_password)
+            await self._repository.revoke_user_sessions(identity.user.id, now)
 
     def _issue_tokens(
         self,
