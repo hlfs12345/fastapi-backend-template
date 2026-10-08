@@ -650,6 +650,10 @@ Design for:
 
 # Testing
 
+Do not create, generate or add new tests unless the user explicitly requests them.
+This restriction also applies to regression tests for bug fixes.
+Existing tests may still be run when relevant to validate a change.
+
 Tests are especially important for:
 
 * tenant isolation;
@@ -664,7 +668,7 @@ Tests are especially important for:
 * campaigns;
 * transactions.
 
-When fixing a business-rule bug, add a regression test when practical.
+When fixing a business-rule bug, only add a regression test if the user explicitly requests it.
 
 ---
 
