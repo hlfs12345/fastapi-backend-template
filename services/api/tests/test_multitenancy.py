@@ -19,6 +19,9 @@ from app.services.authentication import AuthenticationService
 
 def test_multitenant_tables_are_registered_for_migrations() -> None:
     assert set(metadata.tables) == {
+        "legal_acceptances",
+        "legal_document_versions",
+        "legal_documents",
         "permissions",
         "refresh_sessions",
         "role_permissions",

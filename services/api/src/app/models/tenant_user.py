@@ -16,6 +16,12 @@ class TenantUser(Base):
             name="uq_tenant_users_id_tenant_id",
         ),
         UniqueConstraint(
+            "id",
+            "tenant_id",
+            "user_id",
+            name="uq_tenant_users_id_tenant_id_user_id",
+        ),
+        UniqueConstraint(
             "tenant_id",
             "user_id",
             name="uq_tenant_users_tenant_id_user_id",

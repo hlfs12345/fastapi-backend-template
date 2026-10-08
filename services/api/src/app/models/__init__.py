@@ -1,6 +1,9 @@
 from sqlalchemy import MetaData
 
 from app.db.base import Base
+from app.models.legal_acceptance import LegalAcceptance
+from app.models.legal_document import LegalDocument
+from app.models.legal_document_version import LegalDocumentVersion
 from app.models.permission import Permission
 from app.models.refresh_session import RefreshSession
 from app.models.role import Role
@@ -14,6 +17,9 @@ metadata: MetaData = Base.metadata
 
 __all__ = [
     "Permission",
+    "LegalAcceptance",
+    "LegalDocument",
+    "LegalDocumentVersion",
     "RefreshSession",
     "Role",
     "RolePermission",
