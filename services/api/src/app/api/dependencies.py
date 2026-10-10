@@ -9,11 +9,14 @@ from app.core.errors import ApplicationError
 from app.core.tenant_context import TenantContext
 from app.db.database import Database
 from app.repositories.authentication import AuthenticationRepository
+from app.repositories.contacts import ContactRepository
 from app.repositories.legal import LegalRepository
 from app.repositories.roles import RoleRepository
 from app.repositories.tenants import TenantRepository
 from app.repositories.users import UserRepository
 from app.services.authentication import AuthenticationService
+from app.services.contact_data_protection import ContactDataProtector
+from app.services.contacts import ContactService
 from app.services.email_identity import EmailIdentityProtector
 from app.services.legal import LegalService
 from app.services.readiness import ReadinessService
@@ -72,6 +75,16 @@ def get_role_service(
     session: Annotated[AsyncSession, Depends(get_database_session)],
 ) -> RoleService:
     return RoleService(RoleRepository(session))
+
+
+def get_contact_service(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_database_session)],
+) -> ContactService:
+    return ContactService(
+        repository=ContactRepository(session),
+        protector=ContactDataProtector(request.app.state.openbao),
+    )
 
 
 def get_legal_service(
