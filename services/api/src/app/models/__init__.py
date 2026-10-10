@@ -1,6 +1,8 @@
 from sqlalchemy import MetaData
 
 from app.db.base import Base
+from app.models.contact import Contact
+from app.models.contact_pii import ContactPii
 from app.models.legal_acceptance import LegalAcceptance
 from app.models.legal_document import LegalDocument
 from app.models.legal_document_version import LegalDocumentVersion
@@ -16,6 +18,8 @@ from app.models.user import User
 metadata: MetaData = Base.metadata
 
 __all__ = [
+    "Contact",
+    "ContactPii",
     "Permission",
     "LegalAcceptance",
     "LegalDocument",
